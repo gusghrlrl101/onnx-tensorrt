@@ -282,7 +282,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     auto * tensor_ptr = &convertToTensor(inputs.at(0), ctx);
     auto trt_dtype = tensor_ptr->getType();
     // TensorRT currently only supports the following conversion: FP16 -> FP32.
-    ASSERT(trt_dtype == nvinfer1::DataType::kHALF && cast_dtype == ::ONNX_NAMESPACE::TensorProto::FLOAT,
+    ASSERT(/* trt_dtype == nvinfer1::DataType::kHALF && */ cast_dtype == ::ONNX_NAMESPACE::TensorProto::FLOAT,
           ErrorCode::kUNSUPPORTED_NODE);
     // Add the layer.
     nvinfer1::IIdentityLayer* layer = ctx->network()->addIdentity(inputs.at(0).tensor());
