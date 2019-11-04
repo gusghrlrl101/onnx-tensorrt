@@ -52,7 +52,8 @@ void print_usage() {
        << "                [-v] (increase verbosity)" << "\n"
        << "                [-q] (decrease verbosity)" << "\n"
        << "                [-V] (show version information)" << "\n"
-       << "                [-n] (MARVIN: connect NMS plugin behind of Detector)" << "\n"
+       << "                [-N] (MARVIN: connect NMS plugin behind of Detector)" << "\n"
+       << "                [-D] (MARVIN: dynamic batch size)" << "\n"
        << "                [-h] (show help)" << endl;
 }
 
@@ -69,9 +70,10 @@ int main(int argc, char* argv[]) {
   bool print_layer_info = false;
   bool debug_builder = false;
   bool nms = false;
+  bool dynamic_batch = false;
 
   int arg = 0;
-  while( (arg = ::getopt(argc, argv, "o:b:w:t:T:d:lgvqnVh")) != -1 ) {
+  while( (arg = ::getopt(argc, argv, "o:b:w:t:T:d:lgvqVhND")) != -1 ) {
     switch (arg){
     case 'o':
       if( optarg ) { engine_filename = optarg; break; }
@@ -95,9 +97,10 @@ int main(int argc, char* argv[]) {
     case 'g': debug_builder = true; break;
     case 'v': ++verbosity; break;
     case 'q': --verbosity; break;
-    case 'n': nms = true; break;
     case 'V': common::print_version(); return 0;
     case 'h': print_usage(); return 0;
+    case 'N': nms = true; break;
+    case 'D': dynamic_batch = true; break;
     }
   }
   int num_args = argc - optind;
@@ -283,7 +286,52 @@ int main(int argc, char* argv[]) {
         trt_network->getOutput(7 + i)->setName(nms_output_name[i]);
     }
 
-    auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
+    nvinfer1::ICudaEngine* trt_engine = nullptr;
+
+    /* @@ MARVIN DYNAMIC SHAPE */
+    cout << "Dynamic Batch: " << dynamic_batch << endl;
+    auto builder_config = trt_builder->createBuilderConfig();
+    auto optimization_profile = trt_builder->createOptimizationProfile();
+    if (dynamic_batch) {
+      optimization_profile->setDimensions("inputs", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 3, 394, 700));
+      optimization_profile->setDimensions("bb_features0", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 144, 104, 176));
+      optimization_profile->setDimensions("bb_features1", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 192, 52, 88));
+      optimization_profile->setDimensions("bb_features2", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 576, 26, 44));
+      optimization_profile->setDimensions("bb_features3", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 1280, 13, 22));
+      optimization_profile->setDimensions("bb_features4", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 512, 7, 11));
+      optimization_profile->setDimensions("bb_features5", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 256, 4, 6));
+      optimization_profile->setDimensions("bb_features6", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 256, 2, 3));
+      optimization_profile->setDimensions("outputs_bbox0", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, 1393, 1, 4));
+      optimization_profile->setDimensions("outputs_score0", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(max_batch_size, 1393, 1));
+
+      optimization_profile->setDimensions("inputs", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 3, 394, 700));
+      optimization_profile->setDimensions("bb_features0", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 144, 104, 176));
+      optimization_profile->setDimensions("bb_features1", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 192, 52, 88));
+      optimization_profile->setDimensions("bb_features2", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 576, 26, 44));
+      optimization_profile->setDimensions("bb_features3", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 1280, 13, 22));
+      optimization_profile->setDimensions("bb_features4", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 512, 7, 11));
+      optimization_profile->setDimensions("bb_features5", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 256, 4, 6));
+      optimization_profile->setDimensions("bb_features6", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 256, 2, 3));
+      optimization_profile->setDimensions("outputs_bbox0", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(max_batch_size, 1393, 1, 4));
+      optimization_profile->setDimensions("outputs_score0", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(max_batch_size, 1393, 1));
+
+      optimization_profile->setDimensions("inputs", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 3, 394, 700));
+      optimization_profile->setDimensions("bb_features0", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 144, 104, 176));
+      optimization_profile->setDimensions("bb_features1", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 192, 52, 88));
+      optimization_profile->setDimensions("bb_features2", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 576, 26, 44));
+      optimization_profile->setDimensions("bb_features3", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 1280, 13, 22));
+      optimization_profile->setDimensions("bb_features4", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 512, 7, 11));
+      optimization_profile->setDimensions("bb_features5", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 256, 4, 6));
+      optimization_profile->setDimensions("bb_features6", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 256, 2, 3));
+      optimization_profile->setDimensions("outputs_bbox0", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, 1393, 1, 4));
+      optimization_profile->setDimensions("outputs_score0", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(max_batch_size, 1393, 1));
+
+      builder_config->addOptimizationProfile(optimization_profile);
+
+      trt_engine = trt_builder->buildEngineWithConfig(*trt_network.get(), *builder_config);
+    } else
+      trt_engine = trt_builder->buildCudaEngine(*trt_network.get());
+
     auto engine_plan = common::infer_object(trt_engine->serialize());
     std::ofstream engine_file(engine_filename.c_str());
     if (!engine_file) {
