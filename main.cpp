@@ -52,6 +52,7 @@ void print_usage() {
        << "                [-v] (increase verbosity)" << "\n"
        << "                [-q] (decrease verbosity)" << "\n"
        << "                [-V] (show version information)" << "\n"
+       << "                [-n] (MARVIN: connect NMS plugin behind of Detector)" << "\n"
        << "                [-h] (show help)" << endl;
 }
 
@@ -244,17 +245,18 @@ int main(int argc, char* argv[]) {
     trt_builder->setDebugSync(debug_builder);
 
     /* @@ MARVIN DETECOTR + NMS */
-    cout << "nms: " << nms << endl;
+    cout << "NMS: " << nms << endl;
     if (nms) {
       // set nms paramter
       nvinfer1::plugin::NMSParameters nms_parameter;
       nms_parameter.shareLocation = true;
       nms_parameter.backgroundLabelId = -1;
       nms_parameter.numClasses = 1;
-      nms_parameter.scoreThreshold = 0.1f;
+      nms_parameter.topK = 1393;
+      nms_parameter.keepTopK = 100;
+      nms_parameter.scoreThreshold = 0.3f;
       nms_parameter.iouThreshold = 0.5f;
       nms_parameter.isNormalized = false;
-      nms_parameter.keepTopK = 100;
 
       // create nms plugin
       nvinfer1::IPluginV2* nms_plugin = createBatchedNMSPlugin(nms_parameter);
@@ -264,50 +266,21 @@ int main(int argc, char* argv[]) {
       // 8: outputs_score0
       nvinfer1::ITensor* nms_input_tensors[] = {trt_network->getOutput(7), trt_network->getOutput(8)};
 
-      // print nms input tensor
-      for (auto i = 0; i < 2; ++i) {
-        auto dims = nms_input_tensors[i]->getDimensions();
-        cout << i << ": " << dims.nbDims << ": ";
-        for (auto j = 0; j < dims.nbDims; ++j)
-          cout << dims.d[j] << ", ";
-        cout << endl;
-      }
-
       // connect to original network
       auto nms_layer = trt_network->addPluginV2(&nms_input_tensors[0], 2, *nms_plugin);
 
       // set nms output tensor
       for (auto i = 0; i < nms_layer->getNbOutputs(); ++i)
         trt_network->markOutput(*(nms_layer->getOutput(i)));
-      
-      // print nms output tensor
-      for (auto i = 0; i < nms_layer->getNbOutputs(); ++i) {
-        auto dims = nms_layer->getOutput(i)->getDimensions();
-        cout << i << ": " << dims.nbDims << ": ";
-        for (auto j = 0; j < dims.nbDims; ++j)
-          cout << dims.d[j] << ", ";
-        cout << endl;
-      }
 
       // remove original detector's output
       trt_network->unmarkOutput(*(trt_network->getOutput(7)));
       trt_network->unmarkOutput(*(trt_network->getOutput(7)));
 
       // set nms output's name
-      char* nms_output_name[] = {"num_detections", "nmsed_boxes", "nmsed_scores", "nmsed_classes"};
+      const char* nms_output_name[] = {"num_detections", "nmsed_boxes", "nmsed_scores", "nmsed_classes"};
       for (auto i = 0; i < 4; ++i)
         trt_network->getOutput(7 + i)->setName(nms_output_name[i]);
-
-      // final nms engine's output
-      for (auto i = 0; i < trt_network->getNbOutputs(); ++i) {
-        auto nms_tensor = trt_network->getOutput(i);
-        auto nms_out_dims = nms_tensor->getDimensions();
-
-        cout << i << ": " << nms_tensor->getName() << ": ";
-        for (auto j = 0; j < nms_out_dims.nbDims; ++j)
-          cout << nms_out_dims.d[j] << ", ";
-        cout << endl;
-      }
     }
 
     auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
